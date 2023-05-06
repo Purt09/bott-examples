@@ -6,6 +6,9 @@ $coef = $_GET['coef'];
 
 $amount = $_POST['amount'];
 $order_id = $_POST['id'];
+if(is_null($order_id)) {
+    exit('not found order_id');
+}
 $bot_user_id = $_POST['botUser']['id'];
 // в копейки
 //

@@ -2,23 +2,23 @@
 
 $bot_id = $_GET['bot_id'];
 $token = $_GET['token'];
-$coef = $_GET['coef'];
+$bot_user_id = $_GET['bot_user_id'];
+$amount = $_GET['amount'];
 
-$count = $_POST['count'];
-if(is_null($count)) {
-    exit('not found count');
+$order_id = $_POST['id'];
+if(is_null($order_id)) {
+    exit('not found order_id');
 }
-$bot_user_id = $_POST['botUser']['id'];
 // в копейки
-$amount = $count * 100;
 //
-$amount = intval($amount * $coef);
+$amount = intval($amount);
 
 $url = 'https://api.bot-t.com/v1/bot/user/add-balance?token=' . $token;
 $data = [
     'bot_id' => $bot_id,
     'user_id' => $bot_user_id,
     'sum' => round($amount / 100, 2),
+    'comment' => 'Начисление отчисления от заказа фиксированного, номер заказа: ' . $order_id
 ];
 
 // use key 'http' even if you send the request to https://...

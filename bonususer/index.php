@@ -2,15 +2,15 @@
 
 $bot_id = $_GET['bot_id'];
 $token = $_GET['token'];
+$bot_user_id = $_GET['bot_user_id'];
 $coef = $_GET['coef'];
 
-$count = $_POST['count'];
-if(is_null($count)) {
-    exit('not found count');
+$amount = $_POST['amount'];
+$order_id = $_POST['id'];
+if(is_null($order_id)) {
+    exit('not found order_id');
 }
-$bot_user_id = $_POST['botUser']['id'];
 // в копейки
-$amount = $count * 100;
 //
 $amount = intval($amount * $coef);
 
@@ -19,6 +19,7 @@ $data = [
     'bot_id' => $bot_id,
     'user_id' => $bot_user_id,
     'sum' => round($amount / 100, 2),
+    'comment' => 'Начисление отчисления от заказа' . $order_id
 ];
 
 // use key 'http' even if you send the request to https://...
