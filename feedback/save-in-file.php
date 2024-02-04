@@ -1,0 +1,9 @@
+<?php
+file_put_contents(
+    'post.txt',
+    json_encode($_POST)
+);
+file_put_contents(
+    'get.txt',
+    json_encode($_GET)
+);
