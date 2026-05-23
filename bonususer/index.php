@@ -1,5 +1,18 @@
 <?php
 
+/**
+ * Вебхук «уведомление после оплаты заказа» (BOT-T).
+ *
+ * Начисляет отчисление другому пользователю бота (не покупателю): фиксированный bot_user_id
+ * из URL, сумма = amount заказа (копейки) × coef.
+ *
+ * Параметры URL: bot_id, token, bot_user_id, coef.
+ * Тело вебхука: id (заказ), amount.
+ *
+ * Пример URL в ЛК:
+ * https://your-host/bonususer/index.php?bot_id=1&token=BOT_TOKEN&bot_user_id=42&coef=0.1
+ */
+
 $bot_id = $_GET['bot_id'];
 $token = $_GET['token'];
 $bot_user_id = $_GET['bot_user_id'];

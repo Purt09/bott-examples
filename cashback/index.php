@@ -1,5 +1,18 @@
 <?php
 
+/**
+ * Вебхук «уведомление после оплаты заказа» (BOT-T).
+ *
+ * Начисляет покупателю cashback на внутренний баланс бота: сумма заказа (amount, копейки)
+ * умножается на coef и зачисляется через API add-balance.
+ *
+ * Параметры URL: bot_id, token, coef.
+ * Тело вебхука: id (заказ), amount, botUser[id].
+ *
+ * Пример URL в ЛК:
+ * https://your-host/cashback/index.php?bot_id=1&token=BOT_TOKEN&coef=0.05
+ */
+
 $bot_id = $_GET['bot_id'];
 $token = $_GET['token'];
 $coef = $_GET['coef'];

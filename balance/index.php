@@ -1,5 +1,18 @@
 <?php
 
+/**
+ * Вебхук «уведомление после оплаты заказа» (BOT-T).
+ *
+ * Начисляет покупателю баланс за каждую единицу товара в заказе: count × 100 копеек × coef,
+ * затем зачисление через API add-balance (сумма в рублях).
+ *
+ * Параметры URL: bot_id, token, coef.
+ * Тело вебхука: count, botUser[id].
+ *
+ * Пример URL в ЛК:
+ * https://your-host/balance/index.php?bot_id=1&token=BOT_TOKEN&coef=1
+ */
+
 $bot_id = $_GET['bot_id'];
 $token = $_GET['token'];
 $coef = $_GET['coef'];

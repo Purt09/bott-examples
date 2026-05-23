@@ -1,3 +1,8 @@
 # file: ~/.gitignore_global
 .DS_Store
 .idea
+**/sent_*.lock
+python/**/post.txt
+python/**/get.txt
+javascript/**/post.txt
+javascript/**/get.txt
