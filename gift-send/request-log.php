@@ -1,8 +1,8 @@
 <?php
 
 /**
- * Безопасное логирование в log.txt в каталоге скрипта.
- * Не записывает token, telegram_id, admin_id и прочие чувствительные поля.
+ * Логгер для gift-send (автономная копия, работает без папки lib/).
+ * Синхронизируйте с ../lib/request-log.php при изменениях.
  */
 
 /** @var string|null */
@@ -90,14 +90,13 @@ function app_log_trim_excess(string $logFile): void
 }
 
 /**
- * Логирует ответ BOT-T API без токенов и персональных данных.
- *
  * @param array<string, mixed> $response
  * @param array<string, mixed> $extra
  */
 function app_log_bott_response(string $event, array $response, array $extra = []): void
 {
-    app_log($event, array_merge($extra, app_log_bott_summary($response)));
+    $summary = app_log_bott_summary($response);
+    app_log($event, array_merge($extra, $summary));
 }
 
 /**
@@ -134,6 +133,8 @@ function app_log_trace(array $context): array
 }
 
 /**
+ * Входящий запрос (первая строка цепочки).
+ *
  * @param array<string, mixed> $context
  */
 function app_log_incoming(array $context): void
@@ -293,24 +294,4 @@ function bott_api_succeeded(array $response): bool
     $result = $response['result'];
 
     return !($result === false || $result === 0 || $result === '0' || $result === null || $result === '');
-}
-
-/**
- * Подключает request-log.php и инициализирует log.txt в каталоге скрипта.
- */
-function app_log_load(string $scriptDir): void
-{
-    if (!function_exists('app_log')) {
-        $local = $scriptDir . DIRECTORY_SEPARATOR . 'request-log.php';
-        $shared = dirname($scriptDir) . DIRECTORY_SEPARATOR . 'lib' . DIRECTORY_SEPARATOR . 'request-log.php';
-        if (is_file($local)) {
-            require_once $local;
-        } elseif (is_file($shared)) {
-            require_once $shared;
-        }
-    }
-
-    if (function_exists('app_log_init')) {
-        app_log_init($scriptDir);
-    }
 }
