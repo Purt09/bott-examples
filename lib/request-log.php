@@ -27,16 +27,48 @@ function app_log_init(string $dir, ?string $script = null): void
 {
     $GLOBALS['_app_log_dir'] = $dir;
     $GLOBALS['_app_log_script'] = $script ?? basename($_SERVER['SCRIPT_FILENAME'] ?? 'unknown');
-    $GLOBALS['_app_log_file'] = $dir . DIRECTORY_SEPARATOR . 'log.txt';
+    $logFile = $dir . DIRECTORY_SEPARATOR . 'log.txt';
+    $GLOBALS['_app_log_file'] = $logFile;
 
     if (!is_dir($dir)) {
+        error_log('app_log_init: directory not found: ' . $dir);
         return;
     }
 
-    if (!is_file($GLOBALS['_app_log_file'])) {
-        @touch($GLOBALS['_app_log_file']);
-        @chmod($GLOBALS['_app_log_file'], 0664);
+    if (!is_file($logFile)) {
+        app_log_create_file($logFile);
     }
+}
+
+/**
+ * Создаёт log.txt с первой служебной строкой.
+ */
+function app_log_create_file(string $logFile): bool
+{
+    $dir = dirname($logFile);
+    if (!is_dir($dir)) {
+        return false;
+    }
+
+    if (!is_writable($dir)) {
+        @chmod($dir, 0777);
+    }
+
+    $line = date('Y-m-d H:i:s') . " [init] log file created\n";
+    if (@file_put_contents($logFile, $line, LOCK_EX) !== false) {
+        @chmod($logFile, 0666);
+        return true;
+    }
+
+    if (@touch($logFile)) {
+        @chmod($logFile, 0666);
+        @file_put_contents($logFile, $line, FILE_APPEND | LOCK_EX);
+        return is_file($logFile);
+    }
+
+    error_log('app_log_init: cannot create log file: ' . $logFile);
+
+    return false;
 }
 
 /**
@@ -56,7 +88,17 @@ function app_log(string $event, array $context = []): void
         : ' ' . json_encode($safe, JSON_UNESCAPED_UNICODE);
     $line = date('Y-m-d H:i:s') . " [{$event}]{$payload}\n";
 
+    if (!is_file($logFile)) {
+        app_log_create_file($logFile);
+    }
+
     $written = @file_put_contents($logFile, $line, FILE_APPEND | LOCK_EX);
+    if ($written === false) {
+        @chmod(dirname($logFile), 0777);
+        @chmod($logFile, 0666);
+        $written = @file_put_contents($logFile, $line, FILE_APPEND | LOCK_EX);
+    }
+
     if ($written === false) {
         error_log('app_log: cannot write to ' . $logFile);
         return;
@@ -122,7 +164,11 @@ function app_log_bott_summary(array $response): array
 function app_log_begin(): void
 {
     $GLOBALS['_app_log_step'] = 0;
-    $GLOBALS['_app_log_trace'] = bin2hex(random_bytes(4));
+    if (function_exists('random_bytes')) {
+        $GLOBALS['_app_log_trace'] = bin2hex(random_bytes(4));
+    } else {
+        $GLOBALS['_app_log_trace'] = substr(md5(uniqid((string) mt_rand(), true)), 0, 8);
+    }
 }
 
 /**
@@ -296,16 +342,13 @@ function bott_api_succeeded(array $response): bool
 }
 
 /**
- * Подключает request-log.php и инициализирует log.txt в каталоге скрипта.
+ * Подключает lib/request-log.php и инициализирует log.txt в каталоге скрипта.
  */
 function app_log_load(string $scriptDir): void
 {
     if (!function_exists('app_log')) {
-        $local = $scriptDir . DIRECTORY_SEPARATOR . 'request-log.php';
         $shared = dirname($scriptDir) . DIRECTORY_SEPARATOR . 'lib' . DIRECTORY_SEPARATOR . 'request-log.php';
-        if (is_file($local)) {
-            require_once $local;
-        } elseif (is_file($shared)) {
+        if (is_file($shared)) {
             require_once $shared;
         }
     }
