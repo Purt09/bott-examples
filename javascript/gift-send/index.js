@@ -6,7 +6,7 @@
  * Отправляет покупателю Telegram-подарок через BOT-T API (method sendGift).
  * Повторный вебхук с тем же id заказа не дублирует отправку (файл sent_{id}.lock).
  *
- * Параметры URL: bot_id, token, gift_id.
+ * Параметры URL: bot_id, token, gift_id, admin_id (необязательно).
  * Тело вебхука: id (заказ), status (только status=1).
  *
  * Запуск: node javascript/gift-send/index.js
@@ -17,12 +17,34 @@ const {
   parseQuery,
   parsePostForm,
   postJson,
+  postFormUrlencoded,
   sendJson,
   runServer,
   fs,
 } = require('../common');
 
 const DIR = __dirname;
+
+function parseAdminId(query) {
+  const raw = query.admin_id;
+  if (raw == null || raw === '' || !/^-?\d+$/.test(String(raw))) {
+    return null;
+  }
+  return String(raw);
+}
+
+async function notifyAdminPm(token, telegramId, text) {
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  await postFormUrlencoded(url, { chat_id: telegramId, text });
+}
+
+async function adminNotifyOrder(adminId, token, orderId, giftId, success, reason = '') {
+  if (adminId == null) return;
+  const text = success
+    ? `Подарок отправлен покупателю.\nЗаказ: #${orderId}\nПодарок: ${giftId}`
+    : `Не удалось отправить подарок.\nЗаказ: #${orderId}\nПодарок: ${giftId}\nПричина: ${reason}`;
+  await notifyAdminPm(token, adminId, text);
+}
 
 async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -34,6 +56,7 @@ async function handler(req, res) {
   const post = await parsePostForm(req);
 
   const { bot_id: botId, token, gift_id: giftId } = query;
+  const adminId = parseAdminId(query);
   if (!botId || !token || !giftId) {
     sendJson(res, { ok: false, error: 'Required query: bot_id, token, gift_id' }, 400);
     return;
@@ -67,13 +90,21 @@ async function handler(req, res) {
     params: { gift_id: String(giftId) },
   });
 
-  if (!json || !json.result) {
-    const message = (json && json.message) || 'BOT-T API error';
+  if (!json) {
+    await adminNotifyOrder(adminId, token, orderId, String(giftId), false, 'BOT-T API request failed');
+    sendJson(res, { ok: false, error: 'BOT-T API request failed' }, 502);
+    return;
+  }
+
+  if (!json.result) {
+    const message = json.message || 'BOT-T API error';
+    await adminNotifyOrder(adminId, token, orderId, String(giftId), false, message);
     sendJson(res, { ok: false, error: message }, 502);
     return;
   }
 
   fs.writeFileSync(sentMarker, new Date().toISOString(), 'utf8');
+  await adminNotifyOrder(adminId, token, orderId, String(giftId), true);
   sendJson(res, { ok: true, order_id: orderId });
 }
 
