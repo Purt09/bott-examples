@@ -47,9 +47,13 @@
  * (файл sent_msg_transfer_{message_id}_{user_id}.lock).
  */
 
+require_once dirname(__DIR__) . '/lib/request-log.php';
+app_log_init(__DIR__);
+
 header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    app_log('error', ['reason' => 'method_not_allowed', 'method' => $_SERVER['REQUEST_METHOD'] ?? '']);
     http_response_code(405);
     echo json_encode(['ok' => false, 'error' => 'Method not allowed']);
     exit;
@@ -74,6 +78,7 @@ if (
     || $owned_gift_id === null || $owned_gift_id === ''
     || $business_connection_id === null || $business_connection_id === ''
 ) {
+    app_log('error', ['reason' => 'missing_query_params', 'query' => app_log_query_params($_GET)]);
     http_response_code(400);
     echo json_encode(['ok' => false, 'error' => 'Required query: bot_id, token, owned_gift_id, business_connection_id']);
     exit;
@@ -157,6 +162,7 @@ function buildTransferParams(string $businessConnectionId, string $ownedGiftId, 
 $rawBody = file_get_contents('php://input');
 $body = json_decode($rawBody ?: '', true);
 if (!is_array($body)) {
+    app_log('error', ['reason' => 'invalid_json_body', 'bot_id' => $bot_id]);
     http_response_code(400);
     echo json_encode(['ok' => false, 'error' => 'Invalid JSON body']);
     exit;
@@ -167,18 +173,21 @@ $telegram_id = $body['telegram_id'] ?? null;
 $message_id = $body['message_id'] ?? null;
 
 if ($user_id === null || $user_id === '' || !preg_match('/^\d+$/', (string) $user_id)) {
+    app_log('error', ['reason' => 'missing_user_id', 'bot_id' => $bot_id, 'message_id' => $message_id]);
     http_response_code(400);
     echo json_encode(['ok' => false, 'error' => 'Missing or invalid user_id in body']);
     exit;
 }
 
 if ($message_id === null || $message_id === '' || !preg_match('/^\d+$/', (string) $message_id)) {
+    app_log('error', ['reason' => 'missing_message_id', 'bot_id' => $bot_id, 'user_id' => $user_id]);
     http_response_code(400);
     echo json_encode(['ok' => false, 'error' => 'Missing or invalid message_id in body']);
     exit;
 }
 
 if ($telegram_id === null || $telegram_id === '' || !preg_match('/^-?\d+$/', (string) $telegram_id)) {
+    app_log('error', ['reason' => 'missing_recipient_telegram_id', 'bot_id' => $bot_id, 'user_id' => $user_id, 'message_id' => $message_id]);
     http_response_code(400);
     echo json_encode(['ok' => false, 'error' => 'Missing or invalid telegram_id in body']);
     exit;
@@ -188,8 +197,17 @@ $user_id = (int) $user_id;
 $message_id = (int) $message_id;
 $new_owner_chat_id = (int) $telegram_id;
 
+app_log('request', [
+    'bot_id' => $bot_id,
+    'owned_gift_id' => (string) $owned_gift_id,
+    'user_id' => $user_id,
+    'message_id' => $message_id,
+    'star_count' => $star_count,
+]);
+
 $sentMarker = __DIR__ . '/sent_msg_transfer_' . $message_id . '_' . $user_id . '.lock';
 if (is_file($sentMarker)) {
+    app_log('skip', ['reason' => 'already_sent', 'user_id' => $user_id, 'message_id' => $message_id]);
     http_response_code(200);
     echo json_encode(['ok' => true, 'skipped' => true, 'reason' => 'already_sent']);
     exit;
@@ -212,6 +230,7 @@ $payload = [
 $response = bottPostJson($url, $payload);
 
 if ($response === null) {
+    app_log('error', ['reason' => 'bott_api_request_failed', 'user_id' => $user_id, 'message_id' => $message_id, 'method' => 'transferGift']);
     adminNotify($admin_id, $token, $user_id, $new_owner_chat_id, (string) $owned_gift_id, false, 'BOT-T API request failed');
     http_response_code(502);
     echo json_encode(['ok' => false, 'error' => 'BOT-T API request failed']);
@@ -220,6 +239,7 @@ if ($response === null) {
 
 if (empty($response['result'])) {
     $reason = $response['message'] ?? 'BOT-T API error';
+    app_log('error', ['reason' => 'bott_api_error', 'user_id' => $user_id, 'message_id' => $message_id, 'method' => 'transferGift', 'message' => $reason]);
     adminNotify($admin_id, $token, $user_id, $new_owner_chat_id, (string) $owned_gift_id, false, $reason);
     http_response_code(502);
     echo json_encode([
@@ -231,6 +251,7 @@ if (empty($response['result'])) {
 
 file_put_contents($sentMarker, date('c'));
 adminNotify($admin_id, $token, $user_id, $new_owner_chat_id, (string) $owned_gift_id, true);
+app_log('success', ['user_id' => $user_id, 'message_id' => $message_id, 'method' => 'transferGift', 'owned_gift_id' => (string) $owned_gift_id]);
 
 http_response_code(200);
 echo json_encode([

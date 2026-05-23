@@ -14,9 +14,13 @@
  * https://your-host/gift-send/index.php?bot_id=1&token=BOT_TOKEN&gift_id=GIFT_ID&admin_id=123456789
  */
 
+require_once dirname(__DIR__) . '/lib/request-log.php';
+app_log_init(__DIR__);
+
 header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    app_log('error', ['reason' => 'method_not_allowed', 'method' => $_SERVER['REQUEST_METHOD'] ?? '']);
     http_response_code(405);
     echo json_encode(['ok' => false, 'error' => 'Method not allowed']);
     exit;
@@ -31,6 +35,7 @@ if (isset($_GET['admin_id']) && $_GET['admin_id'] !== '' && preg_match('/^-?\d+$
 }
 
 if ($bot_id === null || $bot_id === '' || $token === null || $token === '' || $gift_id === null || $gift_id === '') {
+    app_log('error', ['reason' => 'missing_query_params', 'query' => app_log_query_params($_GET)]);
     http_response_code(400);
     echo json_encode(['ok' => false, 'error' => 'Required query: bot_id, token, gift_id']);
     exit;
@@ -96,6 +101,7 @@ function adminNotify(?string $adminTelegramId, string $token, int $orderId, stri
 
 $order_id = $_POST['id'] ?? null;
 if ($order_id === null || $order_id === '') {
+    app_log('error', ['reason' => 'missing_order_id', 'bot_id' => $bot_id, 'gift_id' => $gift_id]);
     http_response_code(400);
     echo json_encode(['ok' => false, 'error' => 'Missing order id in webhook']);
     exit;
@@ -104,8 +110,16 @@ if ($order_id === null || $order_id === '') {
 $order_id = (int) $order_id;
 $status = (int) ($_POST['status'] ?? -1);
 
+app_log('request', [
+    'bot_id' => $bot_id,
+    'gift_id' => (string) $gift_id,
+    'order_id' => $order_id,
+    'status' => $status,
+]);
+
 // После оплаты BOT-T обычно присылает status=1 (оплачен).
 if ($status !== 1) {
+    app_log('skip', ['reason' => 'status_not_paid', 'order_id' => $order_id, 'status' => $status]);
     http_response_code(200);
     echo json_encode(['ok' => true, 'skipped' => true, 'reason' => 'status_not_paid']);
     exit;
@@ -113,6 +127,7 @@ if ($status !== 1) {
 
 $sentMarker = __DIR__ . '/sent_' . $order_id . '.lock';
 if (is_file($sentMarker)) {
+    app_log('skip', ['reason' => 'already_sent', 'order_id' => $order_id]);
     http_response_code(200);
     echo json_encode(['ok' => true, 'skipped' => true, 'reason' => 'already_sent']);
     exit;
@@ -132,6 +147,7 @@ $payload = [
 $response = bottPostJson($url, $payload);
 
 if ($response === null) {
+    app_log('error', ['reason' => 'bott_api_request_failed', 'order_id' => $order_id, 'method' => 'sendGift']);
     adminNotify($admin_id, $token, $order_id, (string) $gift_id, false, 'BOT-T API request failed');
     http_response_code(502);
     echo json_encode(['ok' => false, 'error' => 'BOT-T API request failed']);
@@ -140,6 +156,7 @@ if ($response === null) {
 
 if (empty($response['result'])) {
     $reason = $response['message'] ?? 'BOT-T API error';
+    app_log('error', ['reason' => 'bott_api_error', 'order_id' => $order_id, 'method' => 'sendGift', 'message' => $reason]);
     adminNotify($admin_id, $token, $order_id, (string) $gift_id, false, $reason);
     http_response_code(502);
     echo json_encode([
@@ -151,6 +168,7 @@ if (empty($response['result'])) {
 
 file_put_contents($sentMarker, date('c'));
 adminNotify($admin_id, $token, $order_id, (string) $gift_id, true);
+app_log('success', ['order_id' => $order_id, 'method' => 'sendGift', 'gift_id' => (string) $gift_id]);
 
 http_response_code(200);
 echo json_encode(['ok' => true, 'order_id' => $order_id]);

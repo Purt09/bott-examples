@@ -2,6 +2,7 @@
 .DS_Store
 .idea
 **/sent_*.lock
+**/log.txt
 python/**/post.txt
 python/**/get.txt
 javascript/**/post.txt
