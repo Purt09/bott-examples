@@ -3,6 +3,7 @@
 /**
  * Безопасное логирование в log.txt в каталоге скрипта.
  * Не записывает token, telegram_id, admin_id и прочие чувствительные поля.
+ * Совместимо с PHP 5.6+.
  */
 
 /** @var string|null */
@@ -21,12 +22,17 @@ $GLOBALS['_app_log_step'] = 0;
 $GLOBALS['_app_log_trace'] = '';
 
 /** Максимум строк в log.txt; при превышении удаляются только самые старые. */
-const APP_LOG_MAX_LINES = 200;
+define('APP_LOG_MAX_LINES', 200);
 
-function app_log_init(string $dir, ?string $script = null): void
+function app_log_init($dir, $script = null)
 {
     $GLOBALS['_app_log_dir'] = $dir;
-    $GLOBALS['_app_log_script'] = $script ?? basename($_SERVER['SCRIPT_FILENAME'] ?? 'unknown');
+    if ($script !== null) {
+        $GLOBALS['_app_log_script'] = $script;
+    } else {
+        $scriptFile = isset($_SERVER['SCRIPT_FILENAME']) ? $_SERVER['SCRIPT_FILENAME'] : 'unknown';
+        $GLOBALS['_app_log_script'] = basename($scriptFile);
+    }
     $logFile = $dir . DIRECTORY_SEPARATOR . 'log.txt';
     $GLOBALS['_app_log_file'] = $logFile;
 
@@ -42,8 +48,11 @@ function app_log_init(string $dir, ?string $script = null): void
 
 /**
  * Создаёт log.txt с первой служебной строкой.
+ *
+ * @param string $logFile
+ * @return bool
  */
-function app_log_create_file(string $logFile): bool
+function app_log_create_file($logFile)
 {
     $dir = dirname($logFile);
     if (!is_dir($dir)) {
@@ -72,18 +81,19 @@ function app_log_create_file(string $logFile): bool
 }
 
 /**
- * @param array<string, mixed> $context
+ * @param string $event
+ * @param array $context
  */
-function app_log(string $event, array $context = []): void
+function app_log($event, array $context = array())
 {
-    $logFile = $GLOBALS['_app_log_file'] ?? null;
+    $logFile = isset($GLOBALS['_app_log_file']) ? $GLOBALS['_app_log_file'] : null;
     if ($logFile === null) {
         return;
     }
 
     $context['script'] = $GLOBALS['_app_log_script'];
     $safe = app_log_sanitize($context);
-    $payload = $safe === []
+    $payload = $safe === array()
         ? ''
         : ' ' . json_encode($safe, JSON_UNESCAPED_UNICODE);
     $line = date('Y-m-d H:i:s') . " [{$event}]{$payload}\n";
@@ -109,8 +119,10 @@ function app_log(string $event, array $context = []): void
 
 /**
  * Оставляет в файле не более APP_LOG_MAX_LINES строк (последние по времени).
+ *
+ * @param string $logFile
  */
-function app_log_trim_excess(string $logFile): void
+function app_log_trim_excess($logFile)
 {
     $maxLines = APP_LOG_MAX_LINES;
     if ($maxLines < 1) {
@@ -134,25 +146,28 @@ function app_log_trim_excess(string $logFile): void
 /**
  * Логирует ответ BOT-T API без токенов и персональных данных.
  *
- * @param array<string, mixed> $response
- * @param array<string, mixed> $extra
+ * @param string $event
+ * @param array $response
+ * @param array $extra
  */
-function app_log_bott_response(string $event, array $response, array $extra = []): void
+function app_log_bott_response($event, array $response, array $extra = array())
 {
     app_log($event, array_merge($extra, app_log_bott_summary($response)));
 }
 
 /**
- * @param array<string, mixed> $response
- * @return array<string, mixed>
+ * @param array $response
+ * @return array
  */
-function app_log_bott_summary(array $response): array
+function app_log_bott_summary(array $response)
 {
-    $summary = [
-        'api_result' => $response['result'] ?? null,
+    $summary = array(
+        'api_result' => isset($response['result']) ? $response['result'] : null,
         'message' => isset($response['message']) ? (string) $response['message'] : null,
-        'code' => $response['code'] ?? $response['error_code'] ?? null,
-    ];
+        'code' => isset($response['code'])
+            ? $response['code']
+            : (isset($response['error_code']) ? $response['error_code'] : null),
+    );
 
     if (isset($response['data']) && is_array($response['data'])) {
         $summary['data'] = app_log_sanitize($response['data']);
@@ -161,7 +176,7 @@ function app_log_bott_summary(array $response): array
     return $summary;
 }
 
-function app_log_begin(): void
+function app_log_begin()
 {
     $GLOBALS['_app_log_step'] = 0;
     if (function_exists('random_bytes')) {
@@ -172,111 +187,125 @@ function app_log_begin(): void
 }
 
 /**
- * @param array<string, mixed> $context
+ * @param array $context
+ * @return array
  */
-function app_log_trace(array $context): array
+function app_log_trace(array $context)
 {
-    return array_merge(['trace' => $GLOBALS['_app_log_trace'] ?? null], $context);
+    $trace = isset($GLOBALS['_app_log_trace']) ? $GLOBALS['_app_log_trace'] : null;
+
+    return array_merge(array('trace' => $trace), $context);
 }
 
 /**
- * @param array<string, mixed> $context
+ * @param array $context
  */
-function app_log_incoming(array $context): void
+function app_log_incoming(array $context)
 {
     app_log('request', app_log_trace($context));
 }
 
 /**
- * @param array<string, mixed> $context
+ * @param string $name
+ * @param array $context
  */
-function app_log_step(string $name, array $context = []): void
+function app_log_step($name, array $context = array())
 {
-    $GLOBALS['_app_log_step'] = (int) ($GLOBALS['_app_log_step'] ?? 0) + 1;
-    app_log('step', app_log_trace(array_merge([
+    $step = isset($GLOBALS['_app_log_step']) ? (int) $GLOBALS['_app_log_step'] : 0;
+    $GLOBALS['_app_log_step'] = $step + 1;
+    app_log('step', app_log_trace(array_merge(array(
         'step' => $GLOBALS['_app_log_step'],
         'step_name' => $name,
-    ], $context)));
+    ), $context)));
 }
 
 /**
- * @param array<string, mixed> $context
+ * @param string $name
+ * @param array $context
  */
-function app_log_step_skip(string $name, array $context = []): void
+function app_log_step_skip($name, array $context = array())
 {
-    $GLOBALS['_app_log_step'] = (int) ($GLOBALS['_app_log_step'] ?? 0) + 1;
-    app_log('skip', app_log_trace(array_merge([
+    $step = isset($GLOBALS['_app_log_step']) ? (int) $GLOBALS['_app_log_step'] : 0;
+    $GLOBALS['_app_log_step'] = $step + 1;
+    app_log('skip', app_log_trace(array_merge(array(
         'step' => $GLOBALS['_app_log_step'],
         'step_name' => $name,
-    ], $context)));
+    ), $context)));
 }
 
 /**
- * @param array<string, mixed> $context
+ * @param string $name
+ * @param array $context
  */
-function app_log_step_error(string $name, array $context = []): void
+function app_log_step_error($name, array $context = array())
 {
-    $GLOBALS['_app_log_step'] = (int) ($GLOBALS['_app_log_step'] ?? 0) + 1;
-    app_log('error', app_log_trace(array_merge([
+    $step = isset($GLOBALS['_app_log_step']) ? (int) $GLOBALS['_app_log_step'] : 0;
+    $GLOBALS['_app_log_step'] = $step + 1;
+    app_log('error', app_log_trace(array_merge(array(
         'step' => $GLOBALS['_app_log_step'],
         'step_name' => $name,
-    ], $context)));
+    ), $context)));
 }
 
 /**
- * @param array<string, mixed> $response
- * @param array<string, mixed> $extra
+ * @param string $name
+ * @param array $response
+ * @param array $extra
  */
-function app_log_step_bott(string $name, array $response, array $extra = []): void
+function app_log_step_bott($name, array $response, array $extra = array())
 {
-    $GLOBALS['_app_log_step'] = (int) ($GLOBALS['_app_log_step'] ?? 0) + 1;
+    $step = isset($GLOBALS['_app_log_step']) ? (int) $GLOBALS['_app_log_step'] : 0;
+    $GLOBALS['_app_log_step'] = $step + 1;
     $level = bott_api_succeeded($response) ? 'step' : 'error';
-    app_log($level, app_log_trace(array_merge([
+    app_log($level, app_log_trace(array_merge(array(
         'step' => $GLOBALS['_app_log_step'],
         'step_name' => $name,
-    ], $extra, app_log_bott_summary($response))));
+    ), $extra, app_log_bott_summary($response))));
 }
 
 /**
- * @return array<string, mixed>
+ * @return array
  */
-function app_log_webhook_post_summary(): array
+function app_log_webhook_post_summary()
 {
-    $recipientTelegramId = $_POST['botUser']['user']['telegram_id'] ?? null;
+    $recipientTelegramId = null;
+    if (isset($_POST['botUser']['user']['telegram_id'])) {
+        $recipientTelegramId = $_POST['botUser']['user']['telegram_id'];
+    }
 
-    return [
-        'order_id' => $_POST['id'] ?? null,
-        'status' => $_POST['status'] ?? null,
+    return array(
+        'order_id' => isset($_POST['id']) ? $_POST['id'] : null,
+        'status' => isset($_POST['status']) ? $_POST['status'] : null,
         'has_recipient_telegram' => $recipientTelegramId !== null
             && $recipientTelegramId !== ''
             && preg_match('/^-?\d+$/', (string) $recipientTelegramId) === 1,
-    ];
+    );
 }
 
 /**
- * @param array<string, mixed> $body
- * @return array<string, mixed>
+ * @param array $body
+ * @return array
  */
-function app_log_json_body_summary(array $body): array
+function app_log_json_body_summary(array $body)
 {
-    $telegramId = $body['telegram_id'] ?? null;
+    $telegramId = isset($body['telegram_id']) ? $body['telegram_id'] : null;
 
-    return [
-        'user_id' => $body['user_id'] ?? null,
-        'message_id' => $body['message_id'] ?? null,
+    return array(
+        'user_id' => isset($body['user_id']) ? $body['user_id'] : null,
+        'message_id' => isset($body['message_id']) ? $body['message_id'] : null,
         'has_telegram_id' => $telegramId !== null
             && $telegramId !== ''
             && preg_match('/^-?\d+$/', (string) $telegramId) === 1,
-    ];
+    );
 }
 
 /**
- * @param array<string, mixed> $data
- * @return array<string, mixed>
+ * @param array $data
+ * @return array
  */
-function app_log_sanitize(array $data): array
+function app_log_sanitize(array $data)
 {
-    $denyExact = [
+    $denyExact = array(
         'token',
         'password',
         'secret',
@@ -293,9 +322,9 @@ function app_log_sanitize(array $data): array
         'first_name',
         'last_name',
         'username',
-    ];
+    );
 
-    $out = [];
+    $out = array();
     foreach ($data as $key => $value) {
         $lk = strtolower((string) $key);
         if (in_array($lk, $denyExact, true) || strpos($lk, 'token') !== false || strpos($lk, 'password') !== false) {
@@ -303,7 +332,7 @@ function app_log_sanitize(array $data): array
         }
         if (is_array($value)) {
             $nested = app_log_sanitize($value);
-            if ($nested !== []) {
+            if ($nested !== array()) {
                 $out[$key] = $nested;
             }
             continue;
@@ -319,18 +348,19 @@ function app_log_sanitize(array $data): array
 }
 
 /**
- * @param array<string, mixed> $query
- * @return array<string, mixed>
+ * @param array $query
+ * @return array
  */
-function app_log_query_params(array $query): array
+function app_log_query_params(array $query)
 {
     return app_log_sanitize($query);
 }
 
 /**
- * @param array<string, mixed> $response
+ * @param array $response
+ * @return bool
  */
-function bott_api_succeeded(array $response): bool
+function bott_api_succeeded(array $response)
 {
     if (!array_key_exists('result', $response)) {
         return false;
@@ -343,8 +373,10 @@ function bott_api_succeeded(array $response): bool
 
 /**
  * Подключает lib/request-log.php и инициализирует log.txt в каталоге скрипта.
+ *
+ * @param string $scriptDir
  */
-function app_log_load(string $scriptDir): void
+function app_log_load($scriptDir)
 {
     if (!function_exists('app_log')) {
         $shared = dirname($scriptDir) . DIRECTORY_SEPARATOR . 'lib' . DIRECTORY_SEPARATOR . 'request-log.php';
