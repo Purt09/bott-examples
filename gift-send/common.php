@@ -315,12 +315,23 @@ function gift_send_dedup_ttl()
     return 120;
 }
 
-function gift_send_dedup_lock_path($dir, $prefix, $userId, $giftId)
+function gift_send_lock_dir($baseDir)
+{
+    $lockDir = rtrim($baseDir, '/\\') . DIRECTORY_SEPARATOR . 'lock';
+    if (!is_dir($lockDir)) {
+        @mkdir($lockDir, 0755, true);
+    }
+
+    return $lockDir;
+}
+
+function gift_send_dedup_lock_path($baseDir, $prefix, $userId, $giftId)
 {
     $safeUser = preg_replace('/[^0-9-]/', '', (string) $userId);
     $safeGift = preg_replace('/[^0-9a-zA-Z_-]/', '', (string) $giftId);
+    $lockDir = gift_send_lock_dir($baseDir);
 
-    return rtrim($dir, '/\\') . DIRECTORY_SEPARATOR . $prefix . '_' . $safeUser . '_' . $safeGift . '.lock';
+    return $lockDir . DIRECTORY_SEPARATOR . $prefix . '_' . $safeUser . '_' . $safeGift . '.lock';
 }
 
 function gift_send_dedup_processing_timeout()
