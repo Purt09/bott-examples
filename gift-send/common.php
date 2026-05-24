@@ -29,6 +29,41 @@ function gift_send_bott_post_json($url, array $payload)
     return is_array($decoded) ? $decoded : null;
 }
 
+function gift_send_telegram_post_json($token, $method, array $params)
+{
+    $url = 'https://api.telegram.org/bot' . $token . '/' . $method;
+    $options = array(
+        'http' => array(
+            'header' => "Content-Type: application/json\r\n",
+            'method' => 'POST',
+            'content' => json_encode($params, JSON_UNESCAPED_UNICODE),
+            'ignore_errors' => true,
+            'timeout' => 30,
+        ),
+    );
+    $result = @file_get_contents($url, false, stream_context_create($options));
+    if ($result === false) {
+        return null;
+    }
+    $decoded = json_decode($result, true);
+
+    return is_array($decoded) ? $decoded : null;
+}
+
+function gift_send_telegram_succeeded(array $response)
+{
+    return isset($response['ok']) && $response['ok'] === true;
+}
+
+function gift_send_telegram_error(array $response, $default = 'Telegram API error')
+{
+    if (isset($response['description']) && $response['description'] !== '') {
+        return (string) $response['description'];
+    }
+
+    return $default;
+}
+
 function gift_send_notify_admin_pm($token, $telegramId, $text)
 {
     $url = 'https://api.telegram.org/bot' . $token . '/sendMessage';

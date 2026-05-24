@@ -141,43 +141,36 @@ if (is_file($sentMarker)) {
 
 app_log_step('deduplication_lock', array('ok' => true, 'user_id' => $user_id, 'message_id' => $message_id));
 
-$payload = array(
-    'bot_id' => $bot_id,
-    'user_id' => $user_id,
-    'method' => 'transferGift',
-    'params' => gift_send_build_transfer_params(
-        (string) $business_connection_id,
-        (string) $owned_gift_id,
-        $new_owner_chat_id,
-        $star_count
-    ),
+$telegramParams = gift_send_build_transfer_params(
+    (string) $business_connection_id,
+    (string) $owned_gift_id,
+    $new_owner_chat_id,
+    $star_count
 );
 
-app_log_step('prepare_bott_payload', array('method' => 'transferGift', 'user_id' => $user_id, 'message_id' => $message_id));
+app_log_step('prepare_telegram_payload', array('method' => 'transferGift', 'user_id' => $user_id, 'message_id' => $message_id));
 
-$url = 'https://api.bot-t.com/v1/bot/user/send-request?token=' . rawurlencode($token);
+app_log_step('telegram_api_request', array('method' => 'transferGift', 'user_id' => $user_id, 'message_id' => $message_id));
 
-app_log_step('bott_api_request', array('method' => 'transferGift', 'user_id' => $user_id, 'message_id' => $message_id));
-
-$response = gift_send_bott_post_json($url, $payload);
+$response = gift_send_telegram_post_json($token, 'transferGift', $telegramParams);
 
 if ($response === null) {
-    app_log_step_error('bott_api_transport', array(
-        'reason' => 'bott_api_request_failed',
+    app_log_step_error('telegram_api_transport', array(
+        'reason' => 'telegram_api_request_failed',
         'user_id' => $user_id,
         'message_id' => $message_id,
         'method' => 'transferGift',
     ));
-    adminNotifyMessageTransfer($admin_id, $token, $user_id, $new_owner_chat_id, (string) $owned_gift_id, false, 'BOT-T API request failed');
+    adminNotifyMessageTransfer($admin_id, $token, $user_id, $new_owner_chat_id, (string) $owned_gift_id, false, 'Telegram API request failed');
     http_response_code(502);
-    echo json_encode(array('ok' => false, 'error' => 'BOT-T API request failed'));
+    echo json_encode(array('ok' => false, 'error' => 'Telegram API request failed'));
     exit;
 }
 
-app_log_step_bott('bott_api_response', $response, array('user_id' => $user_id, 'message_id' => $message_id, 'method' => 'transferGift'));
+app_log_step_telegram('telegram_api_response', $response, array('user_id' => $user_id, 'message_id' => $message_id, 'method' => 'transferGift'));
 
-if (!bott_api_succeeded($response)) {
-    $reason = gift_send_get($response, 'message', 'BOT-T API error');
+if (!gift_send_telegram_succeeded($response)) {
+    $reason = gift_send_telegram_error($response);
     adminNotifyMessageTransfer($admin_id, $token, $user_id, $new_owner_chat_id, (string) $owned_gift_id, false, $reason);
     http_response_code(502);
     echo json_encode(array(

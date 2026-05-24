@@ -3,7 +3,7 @@
 /**
  * Вебхук «Сообщение — API (отправка запроса)» (BOT-T).
  *
- * Отправляет Telegram-подарок пользователю из сценария (method sendGift).
+ * Отправляет Telegram-подарок пользователю из сценария (Telegram Bot API sendGift).
  * Повторный вызов с тем же message_id + user_id не дублирует отправку.
  */
 
@@ -103,11 +103,18 @@ $telegram_id = ($telegram_id !== null && $telegram_id !== '' && preg_match('/^-?
     ? (int) $telegram_id
     : null;
 
+if ($telegram_id === null) {
+    app_log_step_error('validate_body', array('reason' => 'missing_telegram_id', 'user_id' => $user_id, 'message_id' => $message_id));
+    http_response_code(400);
+    echo json_encode(array('ok' => false, 'error' => 'Missing or invalid telegram_id in body'));
+    exit;
+}
+
 app_log_step('validate_body', array(
     'ok' => true,
     'user_id' => $user_id,
     'message_id' => $message_id,
-    'has_telegram_id' => $telegram_id !== null,
+    'has_telegram_id' => true,
 ));
 
 $sentMarker = __DIR__ . '/sent_msg_' . $message_id . '_' . $user_id . '.lock';
@@ -120,40 +127,38 @@ if (is_file($sentMarker)) {
 
 app_log_step('deduplication_lock', array('ok' => true, 'user_id' => $user_id, 'message_id' => $message_id));
 
-$payload = array(
-    'bot_id' => $bot_id,
-    'user_id' => $user_id,
-    'method' => 'sendGift',
-    'params' => array(
-        'gift_id' => (string) $gift_id,
-    ),
+$telegramParams = array(
+    'gift_id' => (string) $gift_id,
+    'user_id' => $telegram_id,
 );
 
-app_log_step('prepare_bott_payload', array('method' => 'sendGift', 'user_id' => $user_id, 'message_id' => $message_id));
+app_log_step('prepare_telegram_payload', array(
+    'method' => 'sendGift',
+    'user_id' => $user_id,
+    'message_id' => $message_id,
+));
 
-$url = 'https://api.bot-t.com/v1/bot/user/send-request?token=' . rawurlencode($token);
+app_log_step('telegram_api_request', array('method' => 'sendGift', 'user_id' => $user_id, 'message_id' => $message_id));
 
-app_log_step('bott_api_request', array('method' => 'sendGift', 'user_id' => $user_id, 'message_id' => $message_id));
-
-$response = gift_send_bott_post_json($url, $payload);
+$response = gift_send_telegram_post_json($token, 'sendGift', $telegramParams);
 
 if ($response === null) {
-    app_log_step_error('bott_api_transport', array(
-        'reason' => 'bott_api_request_failed',
+    app_log_step_error('telegram_api_transport', array(
+        'reason' => 'telegram_api_request_failed',
         'user_id' => $user_id,
         'message_id' => $message_id,
         'method' => 'sendGift',
     ));
-    adminNotifyMessageGift($admin_id, $token, $user_id, $telegram_id, (string) $gift_id, false, 'BOT-T API request failed');
+    adminNotifyMessageGift($admin_id, $token, $user_id, $telegram_id, (string) $gift_id, false, 'Telegram API request failed');
     http_response_code(502);
-    echo json_encode(array('ok' => false, 'error' => 'BOT-T API request failed'));
+    echo json_encode(array('ok' => false, 'error' => 'Telegram API request failed'));
     exit;
 }
 
-app_log_step_bott('bott_api_response', $response, array('user_id' => $user_id, 'message_id' => $message_id, 'method' => 'sendGift'));
+app_log_step_telegram('telegram_api_response', $response, array('user_id' => $user_id, 'message_id' => $message_id, 'method' => 'sendGift'));
 
-if (!bott_api_succeeded($response)) {
-    $reason = gift_send_get($response, 'message', 'BOT-T API error');
+if (!gift_send_telegram_succeeded($response)) {
+    $reason = gift_send_telegram_error($response);
     adminNotifyMessageGift($admin_id, $token, $user_id, $telegram_id, (string) $gift_id, false, $reason);
     http_response_code(502);
     echo json_encode(array(

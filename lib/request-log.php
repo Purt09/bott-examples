@@ -264,6 +264,36 @@ function app_log_step_bott($name, array $response, array $extra = array())
 }
 
 /**
+ * @param array $response
+ * @return array
+ */
+function app_log_telegram_summary(array $response)
+{
+    return array(
+        'api_ok' => isset($response['ok']) ? $response['ok'] : null,
+        'message' => isset($response['description']) ? (string) $response['description'] : null,
+        'code' => isset($response['error_code']) ? $response['error_code'] : null,
+    );
+}
+
+/**
+ * @param string $name
+ * @param array $response
+ * @param array $extra
+ */
+function app_log_step_telegram($name, array $response, array $extra = array())
+{
+    $step = isset($GLOBALS['_app_log_step']) ? (int) $GLOBALS['_app_log_step'] : 0;
+    $GLOBALS['_app_log_step'] = $step + 1;
+    $ok = isset($response['ok']) && $response['ok'] === true;
+    $level = $ok ? 'step' : 'error';
+    app_log($level, app_log_trace(array_merge(array(
+        'step' => $GLOBALS['_app_log_step'],
+        'step_name' => $name,
+    ), $extra, app_log_telegram_summary($response))));
+}
+
+/**
  * @return array
  */
 function app_log_webhook_post_summary()
