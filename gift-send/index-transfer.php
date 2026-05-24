@@ -4,6 +4,7 @@
  * Вебхук «уведомление после оплаты заказа» (BOT-T) — передача коллекционного подарка.
  *
  * Передаёт owned_gift_id через Telegram Bot API (transferGift).
+ * Повторная передача тому же user_id того же owned_gift_id блокируется на 2 минуты.
  * Параметры URL: bot_id, token, owned_gift_id (или gift_id), business_connection_id, admin_id, star_count.
  */
 
@@ -107,6 +108,13 @@ if (isset($_POST['botUser']['user']['telegram_id'])) {
     $telegram_id = $_POST['botUser']['user']['telegram_id'];
 }
 
+$bot_user_id = null;
+if (isset($_POST['botUser']['user']['id']) && $_POST['botUser']['user']['id'] !== '') {
+    $bot_user_id = (int) $_POST['botUser']['user']['id'];
+} elseif (isset($_POST['botUser']['id']) && $_POST['botUser']['id'] !== '') {
+    $bot_user_id = (int) $_POST['botUser']['id'];
+}
+
 if ($telegram_id === null || $telegram_id === '' || !preg_match('/^-?\d+$/', (string) $telegram_id)) {
     app_log_step_error('validate_recipient', array('reason' => 'missing_recipient_telegram_id', 'order_id' => $order_id));
     http_response_code(400);
@@ -117,15 +125,32 @@ if ($telegram_id === null || $telegram_id === '' || !preg_match('/^-?\d+$/', (st
 $new_owner_chat_id = (int) $telegram_id;
 app_log_step('validate_recipient', array('ok' => true, 'order_id' => $order_id, 'has_recipient' => true));
 
-$sentMarker = __DIR__ . '/sent_transfer_' . $order_id . '.lock';
-if (is_file($sentMarker)) {
-    app_log_step_skip('deduplication_lock', array('reason' => 'already_sent', 'order_id' => $order_id));
+$dedupUserId = $bot_user_id !== null ? $bot_user_id : $new_owner_chat_id;
+$sentMarker = gift_send_dedup_acquire(__DIR__, 'sent_transfer', $dedupUserId, (string) $owned_gift_id);
+if ($sentMarker['action'] === 'skip') {
+    app_log_step_skip('deduplication_lock', array(
+        'reason' => 'recently_sent',
+        'user_id' => $dedupUserId,
+        'owned_gift_id' => (string) $owned_gift_id,
+        'order_id' => $order_id,
+        'locked_at' => $sentMarker['locked_at'],
+        'ttl_sec' => $sentMarker['ttl'],
+        'remaining_sec' => $sentMarker['remaining'],
+    ));
     http_response_code(200);
-    echo json_encode(array('ok' => true, 'skipped' => true, 'reason' => 'already_sent'));
+    echo json_encode(array('ok' => true, 'skipped' => true, 'reason' => 'recently_sent'));
     exit;
 }
 
-app_log_step('deduplication_lock', array('ok' => true, 'order_id' => $order_id));
+app_log_step('deduplication_lock', array(
+    'ok' => true,
+    'user_id' => $dedupUserId,
+    'owned_gift_id' => (string) $owned_gift_id,
+    'order_id' => $order_id,
+    'ttl_sec' => $sentMarker['ttl'],
+));
+
+$dedupLockPath = $sentMarker['path'];
 
 $telegramParams = gift_send_build_transfer_params(
     (string) $business_connection_id,
@@ -141,6 +166,7 @@ app_log_step('telegram_api_request', array('method' => 'transferGift', 'order_id
 $response = gift_send_telegram_post_json($token, 'transferGift', $telegramParams);
 
 if ($response === null) {
+    gift_send_dedup_release($dedupLockPath);
     $transportError = gift_send_telegram_transport_message();
     app_log_step_error('telegram_api_transport', array_merge(array(
         'reason' => 'telegram_api_request_failed',
@@ -156,6 +182,7 @@ if ($response === null) {
 app_log_step_telegram('telegram_api_response', $response, array('order_id' => $order_id, 'method' => 'transferGift'));
 
 if (!gift_send_telegram_succeeded($response)) {
+    gift_send_dedup_release($dedupLockPath);
     $reason = gift_send_telegram_error($response);
     adminNotifyOrderTransfer($admin_id, $token, $order_id, (string) $owned_gift_id, false, $reason);
     http_response_code(502);
@@ -166,8 +193,7 @@ if (!gift_send_telegram_succeeded($response)) {
     exit;
 }
 
-file_put_contents($sentMarker, date('c'));
-app_log_step('write_lock_file', array('ok' => true, 'order_id' => $order_id));
+app_log_step('write_lock_file', array('ok' => true, 'user_id' => $dedupUserId, 'owned_gift_id' => (string) $owned_gift_id, 'order_id' => $order_id, 'ttl_sec' => gift_send_dedup_ttl()));
 
 adminNotifyOrderTransfer($admin_id, $token, $order_id, (string) $owned_gift_id, true, '');
 app_log_step('notify_admin', array('ok' => true, 'order_id' => $order_id, 'sent' => $admin_id !== null));

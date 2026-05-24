@@ -296,3 +296,107 @@ function gift_send_get_owned_gift_id()
 
     return $ownedGiftId;
 }
+
+function gift_send_dedup_ttl()
+{
+    return 120;
+}
+
+function gift_send_dedup_lock_path($dir, $prefix, $userId, $giftId)
+{
+    $safeUser = preg_replace('/[^0-9-]/', '', (string) $userId);
+    $safeGift = preg_replace('/[^0-9a-zA-Z_-]/', '', (string) $giftId);
+
+    return rtrim($dir, '/\\') . DIRECTORY_SEPARATOR . $prefix . '_' . $safeUser . '_' . $safeGift . '.lock';
+}
+
+function gift_send_dedup_read_locked_at($path, $fp = null)
+{
+    $content = '';
+    if (is_resource($fp)) {
+        rewind($fp);
+        while (!feof($fp)) {
+            $chunk = fread($fp, 8192);
+            if ($chunk === false) {
+                break;
+            }
+            $content .= $chunk;
+        }
+    } elseif (is_readable($path)) {
+        $content = (string) @file_get_contents($path);
+    }
+
+    $content = trim($content);
+    if ($content !== '' && preg_match('/^\d+$/', $content)) {
+        return (int) $content;
+    }
+
+    return file_exists($path) ? (int) @filemtime($path) : 0;
+}
+
+/**
+ * Блокирует повторную отправку одному user_id того же gift_id на gift_send_dedup_ttl() секунд.
+ * Lock ставится до вызова Telegram API (защита от параллельных запросов).
+ *
+ * @return array action: proceed|skip|error, path, locked_at, ttl, remaining
+ */
+function gift_send_dedup_acquire($dir, $prefix, $userId, $giftId)
+{
+    $ttl = gift_send_dedup_ttl();
+    $path = gift_send_dedup_lock_path($dir, $prefix, $userId, $giftId);
+    $now = time();
+
+    $fp = @fopen($path, 'c+');
+    if ($fp === false) {
+        return array(
+            'action' => 'error',
+            'path' => $path,
+            'ttl' => $ttl,
+        );
+    }
+
+    if (!flock($fp, LOCK_EX)) {
+        fclose($fp);
+
+        return array(
+            'action' => 'error',
+            'path' => $path,
+            'ttl' => $ttl,
+        );
+    }
+
+    $lockedAt = gift_send_dedup_read_locked_at($path, $fp);
+    if ($lockedAt > 0 && ($now - $lockedAt) < $ttl) {
+        flock($fp, LOCK_UN);
+        fclose($fp);
+
+        return array(
+            'action' => 'skip',
+            'path' => $path,
+            'locked_at' => $lockedAt,
+            'ttl' => $ttl,
+            'remaining' => $ttl - ($now - $lockedAt),
+        );
+    }
+
+    ftruncate($fp, 0);
+    rewind($fp);
+    fwrite($fp, (string) $now);
+    fflush($fp);
+    flock($fp, LOCK_UN);
+    fclose($fp);
+
+    return array(
+        'action' => 'proceed',
+        'path' => $path,
+        'locked_at' => $now,
+        'ttl' => $ttl,
+    );
+}
+
+function gift_send_dedup_release($path)
+{
+    if ($path !== null && $path !== '' && is_file($path)) {
+        @unlink($path);
+    }
+}

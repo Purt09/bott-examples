@@ -3,8 +3,7 @@
 /**
  * Вебхук «Сообщение — API (отправка запроса)» (BOT-T) — передача коллекционного подарка.
  *
- * Повторный вызов с тем же message_id + user_id не дублирует передачу
- * (файл sent_msg_transfer_{message_id}_{user_id}.lock).
+ * Повторная передача тому же user_id того же owned_gift_id блокируется на 2 минуты.
  *
  * Параметры URL: bot_id, token, owned_gift_id (или gift_id), business_connection_id, admin_id, star_count.
  */
@@ -131,15 +130,31 @@ app_log_step('validate_body', array(
     'has_recipient' => true,
 ));
 
-$sentMarker = __DIR__ . '/sent_msg_transfer_' . $message_id . '_' . $user_id . '.lock';
-if (is_file($sentMarker)) {
-    app_log_step_skip('deduplication_lock', array('reason' => 'already_sent', 'user_id' => $user_id, 'message_id' => $message_id));
+$sentMarker = gift_send_dedup_acquire(__DIR__, 'sent_transfer', $user_id, (string) $owned_gift_id);
+if ($sentMarker['action'] === 'skip') {
+    app_log_step_skip('deduplication_lock', array(
+        'reason' => 'recently_sent',
+        'user_id' => $user_id,
+        'owned_gift_id' => (string) $owned_gift_id,
+        'message_id' => $message_id,
+        'locked_at' => $sentMarker['locked_at'],
+        'ttl_sec' => $sentMarker['ttl'],
+        'remaining_sec' => $sentMarker['remaining'],
+    ));
     http_response_code(200);
-    echo json_encode(array('ok' => true, 'skipped' => true, 'reason' => 'already_sent'));
+    echo json_encode(array('ok' => true, 'skipped' => true, 'reason' => 'recently_sent'));
     exit;
 }
 
-app_log_step('deduplication_lock', array('ok' => true, 'user_id' => $user_id, 'message_id' => $message_id));
+app_log_step('deduplication_lock', array(
+    'ok' => true,
+    'user_id' => $user_id,
+    'owned_gift_id' => (string) $owned_gift_id,
+    'message_id' => $message_id,
+    'ttl_sec' => $sentMarker['ttl'],
+));
+
+$dedupLockPath = $sentMarker['path'];
 
 $telegramParams = gift_send_build_transfer_params(
     (string) $business_connection_id,
@@ -155,6 +170,7 @@ app_log_step('telegram_api_request', array('method' => 'transferGift', 'user_id'
 $response = gift_send_telegram_post_json($token, 'transferGift', $telegramParams);
 
 if ($response === null) {
+    gift_send_dedup_release($dedupLockPath);
     $transportError = gift_send_telegram_transport_message();
     app_log_step_error('telegram_api_transport', array_merge(array(
         'reason' => 'telegram_api_request_failed',
@@ -171,6 +187,7 @@ if ($response === null) {
 app_log_step_telegram('telegram_api_response', $response, array('user_id' => $user_id, 'message_id' => $message_id, 'method' => 'transferGift'));
 
 if (!gift_send_telegram_succeeded($response)) {
+    gift_send_dedup_release($dedupLockPath);
     $reason = gift_send_telegram_error($response);
     adminNotifyMessageTransfer($admin_id, $token, $user_id, $new_owner_chat_id, (string) $owned_gift_id, false, $reason);
     http_response_code(502);
@@ -181,8 +198,7 @@ if (!gift_send_telegram_succeeded($response)) {
     exit;
 }
 
-file_put_contents($sentMarker, date('c'));
-app_log_step('write_lock_file', array('ok' => true, 'user_id' => $user_id, 'message_id' => $message_id));
+app_log_step('write_lock_file', array('ok' => true, 'user_id' => $user_id, 'owned_gift_id' => (string) $owned_gift_id, 'message_id' => $message_id, 'ttl_sec' => gift_send_dedup_ttl()));
 
 adminNotifyMessageTransfer($admin_id, $token, $user_id, $new_owner_chat_id, (string) $owned_gift_id, true, '');
 app_log_step('notify_admin', array('ok' => true, 'user_id' => $user_id, 'sent' => $admin_id !== null));
