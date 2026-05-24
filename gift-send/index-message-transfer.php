@@ -155,15 +155,16 @@ app_log_step('telegram_api_request', array('method' => 'transferGift', 'user_id'
 $response = gift_send_telegram_post_json($token, 'transferGift', $telegramParams);
 
 if ($response === null) {
-    app_log_step_error('telegram_api_transport', array(
+    $transportError = gift_send_telegram_transport_message();
+    app_log_step_error('telegram_api_transport', array_merge(array(
         'reason' => 'telegram_api_request_failed',
         'user_id' => $user_id,
         'message_id' => $message_id,
         'method' => 'transferGift',
-    ));
-    adminNotifyMessageTransfer($admin_id, $token, $user_id, $new_owner_chat_id, (string) $owned_gift_id, false, 'Telegram API request failed');
+    ), gift_send_telegram_transport_log_context()));
+    adminNotifyMessageTransfer($admin_id, $token, $user_id, $new_owner_chat_id, (string) $owned_gift_id, false, $transportError);
     http_response_code(502);
-    echo json_encode(array('ok' => false, 'error' => 'Telegram API request failed'));
+    echo json_encode(array('ok' => false, 'error' => $transportError));
     exit;
 }
 
