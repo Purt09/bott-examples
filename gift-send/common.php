@@ -247,7 +247,20 @@ function gift_send_telegram_post_json($token, $method, array $params)
 
 function gift_send_telegram_succeeded(array $response)
 {
-    return isset($response['ok']) && $response['ok'] === true;
+    if (isset($response['ok']) && $response['ok'] === true) {
+        return true;
+    }
+
+    return gift_send_telegram_is_duplicate_submit($response);
+}
+
+function gift_send_telegram_is_duplicate_submit(array $response)
+{
+    if (!isset($response['description'])) {
+        return false;
+    }
+
+    return stripos((string) $response['description'], 'FORM_SUBMIT_DUPLICATE') !== false;
 }
 
 function gift_send_telegram_error(array $response, $default = 'Telegram API error')
@@ -310,7 +323,34 @@ function gift_send_dedup_lock_path($dir, $prefix, $userId, $giftId)
     return rtrim($dir, '/\\') . DIRECTORY_SEPARATOR . $prefix . '_' . $safeUser . '_' . $safeGift . '.lock';
 }
 
-function gift_send_dedup_read_locked_at($path, $fp = null)
+function gift_send_dedup_processing_timeout()
+{
+    return 45;
+}
+
+function gift_send_dedup_parse_state($content)
+{
+    $content = trim((string) $content);
+    if ($content === '') {
+        return null;
+    }
+    if (preg_match('/^([pd]):(\d+)$/', $content, $matches)) {
+        return array(
+            'state' => $matches[1] === 'd' ? 'done' : 'processing',
+            'at' => (int) $matches[2],
+        );
+    }
+    if (preg_match('/^\d+$/', $content)) {
+        return array(
+            'state' => 'done',
+            'at' => (int) $content,
+        );
+    }
+
+    return null;
+}
+
+function gift_send_dedup_read_state($path, $fp = null)
 {
     $content = '';
     if (is_resource($fp)) {
@@ -326,26 +366,75 @@ function gift_send_dedup_read_locked_at($path, $fp = null)
         $content = (string) @file_get_contents($path);
     }
 
-    $content = trim($content);
-    if ($content !== '' && preg_match('/^\d+$/', $content)) {
-        return (int) $content;
-    }
-
-    return file_exists($path) ? (int) @filemtime($path) : 0;
+    return gift_send_dedup_parse_state($content);
 }
 
-/**
- * Блокирует повторную отправку одному user_id того же gift_id на gift_send_dedup_ttl() секунд.
- * Lock ставится до вызова Telegram API (защита от параллельных запросов).
- *
- * @return array action: proceed|skip|error, path, locked_at, ttl, remaining
- */
-function gift_send_dedup_acquire($dir, $prefix, $userId, $giftId)
+function gift_send_dedup_write_state($path, $state, $timestamp = null)
 {
-    $ttl = gift_send_dedup_ttl();
-    $path = gift_send_dedup_lock_path($dir, $prefix, $userId, $giftId);
-    $now = time();
+    $timestamp = $timestamp !== null ? (int) $timestamp : time();
+    $prefix = $state === 'done' ? 'd' : 'p';
+    $fp = @fopen($path, 'c+');
+    if ($fp === false) {
+        return false;
+    }
+    if (!flock($fp, LOCK_EX)) {
+        fclose($fp);
 
+        return false;
+    }
+    ftruncate($fp, 0);
+    rewind($fp);
+    fwrite($fp, $prefix . ':' . $timestamp);
+    fflush($fp);
+    flock($fp, LOCK_UN);
+    fclose($fp);
+
+    return true;
+}
+
+function gift_send_dedup_wait_for_peer($path, $maxWaitSeconds)
+{
+    $deadline = time() + (int) $maxWaitSeconds;
+    while (time() < $deadline) {
+        usleep(500000);
+        if (!is_file($path)) {
+            return 'released';
+        }
+        $state = gift_send_dedup_read_state($path);
+        if ($state !== null && $state['state'] === 'done') {
+            return 'done';
+        }
+        if ($state !== null && $state['state'] === 'processing') {
+            $age = time() - $state['at'];
+            if ($age >= gift_send_dedup_processing_timeout()) {
+                return 'stale';
+            }
+        }
+    }
+
+    return 'timeout';
+}
+
+function gift_send_dedup_skip_result($path, array $state, $ttl)
+{
+    $remaining = $ttl - (time() - $state['at']);
+    if ($remaining < 0) {
+        $remaining = 0;
+    }
+
+    return array(
+        'action' => 'skip',
+        'path' => $path,
+        'reason' => 'already_sent',
+        'locked_at' => $state['at'],
+        'ttl' => $ttl,
+        'remaining' => $remaining,
+    );
+}
+
+function gift_send_dedup_try_acquire_once($path, $ttl, $processingTimeout)
+{
+    $now = time();
     $fp = @fopen($path, 'c+');
     if ($fp === false) {
         return array(
@@ -365,23 +454,31 @@ function gift_send_dedup_acquire($dir, $prefix, $userId, $giftId)
         );
     }
 
-    $lockedAt = gift_send_dedup_read_locked_at($path, $fp);
-    if ($lockedAt > 0 && ($now - $lockedAt) < $ttl) {
-        flock($fp, LOCK_UN);
-        fclose($fp);
+    $state = gift_send_dedup_read_state($path, $fp);
+    if ($state !== null) {
+        $age = $now - $state['at'];
+        if ($state['state'] === 'done' && $age < $ttl) {
+            flock($fp, LOCK_UN);
+            fclose($fp);
 
-        return array(
-            'action' => 'skip',
-            'path' => $path,
-            'locked_at' => $lockedAt,
-            'ttl' => $ttl,
-            'remaining' => $ttl - ($now - $lockedAt),
-        );
+            return gift_send_dedup_skip_result($path, $state, $ttl);
+        }
+        if ($state['state'] === 'processing' && $age < $processingTimeout) {
+            flock($fp, LOCK_UN);
+            fclose($fp);
+
+            return array(
+                'action' => 'wait',
+                'path' => $path,
+                'ttl' => $ttl,
+                'locked_at' => $state['at'],
+            );
+        }
     }
 
     ftruncate($fp, 0);
     rewind($fp);
-    fwrite($fp, (string) $now);
+    fwrite($fp, 'p:' . $now);
     fflush($fp);
     flock($fp, LOCK_UN);
     fclose($fp);
@@ -392,6 +489,43 @@ function gift_send_dedup_acquire($dir, $prefix, $userId, $giftId)
         'locked_at' => $now,
         'ttl' => $ttl,
     );
+}
+
+/**
+ * Блокирует повторную отправку одному user_id того же gift_id на gift_send_dedup_ttl() секунд.
+ * Lock ставится до вызова Telegram API; параллельные запросы ждут завершения первого.
+ *
+ * @return array action: proceed|skip|error, path, locked_at, ttl, remaining, reason
+ */
+function gift_send_dedup_acquire($dir, $prefix, $userId, $giftId)
+{
+    $ttl = gift_send_dedup_ttl();
+    $processingTimeout = gift_send_dedup_processing_timeout();
+    $path = gift_send_dedup_lock_path($dir, $prefix, $userId, $giftId);
+
+    for ($attempt = 0; $attempt < 3; $attempt++) {
+        $result = gift_send_dedup_try_acquire_once($path, $ttl, $processingTimeout);
+        if ($result['action'] !== 'wait') {
+            return $result;
+        }
+
+        $waitResult = gift_send_dedup_wait_for_peer($path, $processingTimeout + 5);
+        if ($waitResult === 'done') {
+            $state = gift_send_dedup_read_state($path);
+            if ($state !== null) {
+                return gift_send_dedup_skip_result($path, $state, $ttl);
+            }
+
+            return gift_send_dedup_skip_result($path, array('state' => 'done', 'at' => time()), $ttl);
+        }
+    }
+
+    return gift_send_dedup_try_acquire_once($path, $ttl, 0);
+}
+
+function gift_send_dedup_mark_done($path)
+{
+    gift_send_dedup_write_state($path, 'done');
 }
 
 function gift_send_dedup_release($path)

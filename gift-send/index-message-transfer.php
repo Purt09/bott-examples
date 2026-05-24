@@ -133,16 +133,16 @@ app_log_step('validate_body', array(
 $sentMarker = gift_send_dedup_acquire(__DIR__, 'sent_transfer', $user_id, (string) $owned_gift_id);
 if ($sentMarker['action'] === 'skip') {
     app_log_step_skip('deduplication_lock', array(
-        'reason' => 'recently_sent',
+        'reason' => isset($sentMarker['reason']) ? $sentMarker['reason'] : 'already_sent',
         'user_id' => $user_id,
         'owned_gift_id' => (string) $owned_gift_id,
         'message_id' => $message_id,
-        'locked_at' => $sentMarker['locked_at'],
+        'locked_at' => isset($sentMarker['locked_at']) ? $sentMarker['locked_at'] : null,
         'ttl_sec' => $sentMarker['ttl'],
-        'remaining_sec' => $sentMarker['remaining'],
+        'remaining_sec' => isset($sentMarker['remaining']) ? $sentMarker['remaining'] : null,
     ));
     http_response_code(200);
-    echo json_encode(array('ok' => true, 'skipped' => true, 'reason' => 'recently_sent'));
+    echo json_encode(array('ok' => true, 'skipped' => true, 'reason' => isset($sentMarker['reason']) ? $sentMarker['reason'] : 'already_sent'));
     exit;
 }
 
@@ -184,7 +184,10 @@ if ($response === null) {
     exit;
 }
 
-app_log_step_telegram('telegram_api_response', $response, array('user_id' => $user_id, 'message_id' => $message_id, 'method' => 'transferGift'));
+app_log_step_telegram('telegram_api_response', $response, array_merge(
+    array('user_id' => $user_id, 'message_id' => $message_id, 'method' => 'transferGift'),
+    gift_send_telegram_is_duplicate_submit($response) ? array('telegram_duplicate_ok' => true) : array()
+));
 
 if (!gift_send_telegram_succeeded($response)) {
     gift_send_dedup_release($dedupLockPath);
@@ -198,6 +201,7 @@ if (!gift_send_telegram_succeeded($response)) {
     exit;
 }
 
+gift_send_dedup_mark_done($dedupLockPath);
 app_log_step('write_lock_file', array('ok' => true, 'user_id' => $user_id, 'owned_gift_id' => (string) $owned_gift_id, 'message_id' => $message_id, 'ttl_sec' => gift_send_dedup_ttl()));
 
 adminNotifyMessageTransfer($admin_id, $token, $user_id, $new_owner_chat_id, (string) $owned_gift_id, true, '');
