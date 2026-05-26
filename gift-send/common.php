@@ -6,9 +6,52 @@
 
 require_once dirname(__DIR__) . '/lib/env.php';
 
+function gift_send_trim_scalar($value)
+{
+    if (is_string($value)) {
+        return trim($value);
+    }
+
+    return $value;
+}
+
+/**
+ * Рекурсивно обрезает пробелы у строк в массиве (GET/POST/webhook).
+ *
+ * @param array $data
+ * @return array
+ */
+function gift_send_trim_array(array $data)
+{
+    foreach ($data as $key => $value) {
+        if (is_string($value)) {
+            $data[$key] = trim($value);
+        } elseif (is_array($value)) {
+            $data[$key] = gift_send_trim_array($value);
+        }
+    }
+
+    return $data;
+}
+
+/** Нормализует входные $_GET и $_POST (пробелы по краям строк). */
+function gift_send_normalize_request()
+{
+    if (!empty($_GET) && is_array($_GET)) {
+        $_GET = gift_send_trim_array($_GET);
+    }
+    if (!empty($_POST) && is_array($_POST)) {
+        $_POST = gift_send_trim_array($_POST);
+    }
+}
+
 function gift_send_get($source, $key, $default = null)
 {
-    return isset($source[$key]) ? $source[$key] : $default;
+    if (!isset($source[$key])) {
+        return $default;
+    }
+
+    return gift_send_trim_scalar($source[$key]);
 }
 
 function gift_send_proxy_config()

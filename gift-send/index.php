@@ -10,6 +10,7 @@
 
 require_once dirname(__DIR__) . '/lib/request-log.php';
 require_once __DIR__ . '/common.php';
+gift_send_normalize_request();
 
 app_log_init(__DIR__);
 app_log_begin();
@@ -36,8 +37,9 @@ $bot_id = gift_send_get($_GET, 'bot_id');
 $token = gift_send_get($_GET, 'token');
 $gift_id = gift_send_get($_GET, 'gift_id');
 $admin_id = null;
-if (isset($_GET['admin_id']) && $_GET['admin_id'] !== '' && preg_match('/^-?\d+$/', (string) $_GET['admin_id'])) {
-    $admin_id = (string) $_GET['admin_id'];
+$admin_id_raw = gift_send_get($_GET, 'admin_id');
+if ($admin_id_raw !== null && $admin_id_raw !== '' && preg_match('/^-?\d+$/', (string) $admin_id_raw)) {
+    $admin_id = (string) $admin_id_raw;
 }
 
 if ($bot_id === null || $bot_id === '' || $token === null || $token === '' || $gift_id === null || $gift_id === '') {

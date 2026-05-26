@@ -10,6 +10,7 @@
 
 require_once dirname(__DIR__) . '/lib/request-log.php';
 require_once __DIR__ . '/common.php';
+gift_send_normalize_request();
 
 app_log_init(__DIR__);
 app_log_begin();
@@ -37,12 +38,14 @@ $token = gift_send_get($_GET, 'token');
 $owned_gift_id = gift_send_get_owned_gift_id();
 $business_connection_id = gift_send_get($_GET, 'business_connection_id');
 $admin_id = null;
-if (isset($_GET['admin_id']) && $_GET['admin_id'] !== '' && preg_match('/^-?\d+$/', (string) $_GET['admin_id'])) {
-    $admin_id = (string) $_GET['admin_id'];
+$admin_id_raw = gift_send_get($_GET, 'admin_id');
+if ($admin_id_raw !== null && $admin_id_raw !== '' && preg_match('/^-?\d+$/', (string) $admin_id_raw)) {
+    $admin_id = (string) $admin_id_raw;
 }
 $star_count = null;
-if (isset($_GET['star_count']) && $_GET['star_count'] !== '' && preg_match('/^\d+$/', (string) $_GET['star_count'])) {
-    $star_count = (int) $_GET['star_count'];
+$star_count_raw = gift_send_get($_GET, 'star_count');
+if ($star_count_raw !== null && $star_count_raw !== '' && preg_match('/^\d+$/', (string) $star_count_raw)) {
+    $star_count = (int) $star_count_raw;
 }
 
 if (
