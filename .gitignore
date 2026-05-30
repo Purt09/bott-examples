@@ -3,7 +3,14 @@
 .idea
 **/sent_*.lock
 gift-send/lock/*.lock
+
+# Logs
+*.log
+*.log.*
 **/log.txt
+**/logs/
+logs/
+error_log
 python/**/post.txt
 python/**/get.txt
 javascript/**/post.txt
