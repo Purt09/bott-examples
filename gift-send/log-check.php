@@ -9,7 +9,7 @@ register_shutdown_function(function () {
     if ($err === null) {
         return;
     }
-    $fatal = [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR];
+    $fatal = array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR);
     if (!in_array($err['type'], $fatal, true)) {
         return;
     }
@@ -50,12 +50,12 @@ app_log_begin();
 
 $logFile = __DIR__ . DIRECTORY_SEPARATOR . 'log.txt';
 
-app_log_incoming([
+app_log_incoming(array(
     'http_method' => isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : 'CLI',
     'source' => 'log-check.php',
-]);
+));
 
-app_log_step('self_test', ['ok' => true]);
+app_log_step('self_test', array('ok' => true));
 
 $exists = is_file($logFile);
 $writableDir = is_writable(__DIR__);
